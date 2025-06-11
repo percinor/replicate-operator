@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Replicate Operator</title>
+    <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Replicate Operator</h1>
+        </header>
+
+        <div id="initial-view">
+            <button id="start-recording-btn" class="btn btn-primary">Start Recording</button>
+        </div>
+
+        <div id="recording-view" class="hidden">
+            <button id="finish-save-btn" class="btn btn-success">Finish & Save</button>
+            <button id="cancel-btn" class="btn btn-danger">Cancel</button>
+            
+            <div class="steps-container">
+                <h3>Live Recording Steps</h3>
+                <ul id="live-steps-list">
+                    <!-- Live steps will be added here -->
+                </ul>
+            </div>
+        </div>
+        
+        <hr>
+
+        <div class="saved-flows">
+            <h3>Saved Flows</h3>
+            <div id="saved-flows-list">
+                <!-- Saved flows will be listed here -->
+            </div>
+            <div class="flow-actions">
+                <button id="run-flow-btn" disabled>Run Flow</button>
+                <button id="display-flow-btn" disabled>Display Flow</button>
+                <button id="delete-flow-btn" disabled>Delete</button>
+            </div>
+        </div>
+    </div>
+    <script src="sidepanel.js"></script>
+</body>
+</html>
