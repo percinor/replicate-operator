@@ -1,182 +1,84 @@
 // =================================================================================
-// Replicate Operator - content_script.js (Final Corrected Version)
+// Replicate Operator - content_script.js (Final "Mousedown-is-King" Model)
 // =================================================================================
 
-// The injection guard now acts purely as a fallback.
-if (window.replicateOperatorInjected) {
-    console.warn("Replicate Operator: Duplicate script execution halted. The ping-pong mechanism should handle this.");
+if (window.replicateOperatorHasRun) {
+    // Guard against double execution
 } else {
-    // Mark this instance as injected immediately.
-    window.replicateOperatorInjected = true;
-    console.log("Replicate Operator: Content script successfully injected and is now listening.");
+    window.replicateOperatorHasRun = true;
+    console.log(`%c[CS] Replicate Operator: Script active in frame: ${window.location.href}`, 'background: #222; color: #bada55');
 
-    // --- PING-PONG LISTENER ---
-    const pingListener = (request, sender, sendResponse) => {
-        if (request.type === 'ping') {
-            console.log("Replicate Operator: Received PING, sending PONG.");
-            sendResponse({ status: 'pong' });
-            return true;
-        }
-    };
-    chrome.runtime.onMessage.addListener(pingListener);
-
-    // --- DEBOUNCE UTILITY ---
-    function debounce(func, delay) {
-        let timeout;
-        return function(...args) {
-            const context = this;
-            clearTimeout(timeout);
-            timeout = setTimeout(() => func.apply(context, args), delay);
-        };
-    }
-
-    // --- HELPER: sendMessageToBackground (REFINED) ---
-    // This version is more robust against context invalidation errors.
-    function sendMessageToBackground(message) {
-        try {
-            // Check if runtime and sendMessage are available before calling
-            if (chrome.runtime && chrome.runtime.sendMessage) {
-                chrome.runtime.sendMessage(message);
-            }
-        } catch (error) {
-            // This error is expected during page navigation/reloads.
-            // We just log it and do nothing else. The background script will handle re-injection.
-            if (error.message.includes("Extension context invalidated")) {
-                console.warn(`Replicate Operator: Context was invalidated while trying to send a message. This is normal during page transitions.`);
-                // *** CRITICAL: DO NOT remove listeners here. ***
-            } else {
-                console.error("Replicate Operator: An unexpected error occurred while sending a message:", error);
-            }
-        }
-    }
-
-    // --- CORE EVENT HANDLERS ---
-    
-    // Records the final value of an input field.
-    function recordInputChange(target) {
-        if (!target) return;
-        console.log(`%cRecording input change for:`, 'color: lightgreen;', target);
-        const action = {
-            type: 'change',
-            selector: getSelector(target),
-            value: target.value
-        };
-        sendMessageToBackground({ type: 'recordAction', action: action });
-    }
-
-    // Debounced version for frequent 'input' events.
-    const debouncedRecordInputChange = debounce(recordInputChange, 500);
-
-    // Handles typing in input fields.
-    function handleInput(event) {
-        const target = event.target;
-        if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
-        console.log(`%cINPUT event detected`, 'color: skyblue;', 'Target:', target);
-        debouncedRecordInputChange(target);
-    }
-    
-    // Handles when an input field loses focus.
-    function handleBlur(event) {
-        const target = event.target;
-        if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
-        
-        // Cancel any pending debounced call to avoid double-recording.
-        debouncedRecordInputChange.toString(); // This is a trick to access the timeout variable if it were exposed.
-                                                // Since it's not, the better way is to call it directly.
-                                                // The debounce implementation will clear the previous timeout.
-                                                // But let's be explicit and just record it.
-                                                
-        console.log(`%cBLUR event detected`, 'color: orange; font-weight: bold;', 'Target:', target);
-        // Record immediately on blur.
-        recordInputChange(target);
-    }
-    
-    // Handles clicks on interactive elements.
-    function handleClick(event) {
-        // Debounce might have a pending input change, so let's record it first if the click is outside the input
-        if(document.activeElement && ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName) && document.activeElement !== event.target){
-            recordInputChange(document.activeElement);
-        }
-
-        if (!event.view || event.view.location.protocol === 'chrome-extension:') return;
-        if (!isValidClickTarget(event.target)) return;
-        
-        const action = {
-            type: 'click',
-            selector: getSelector(event.target),
-            label: event.target.innerText ? event.target.innerText.trim().substring(0, 50) : ''
-        };
-        sendMessageToBackground({ type: 'recordAction', action: action });
-    }
-
-
-    // --- ADD EVENT LISTENERS ---
-    document.addEventListener('click', handleClick, true);
-    document.addEventListener('input', handleInput, true);
-    document.addEventListener('blur', handleBlur, true);
-    console.log("Replicate Operator: 'click', 'input', and 'blur' event listeners are now active.");
-
-    // --- HELPER FUNCTIONS (CORRECTED AND UN-MINIFIED) ---
-
+    // --- UTILITIES (Safe and Correct) ---
+    function sendMessage(action) { try { if (chrome.runtime && chrome.runtime.sendMessage) chrome.runtime.sendMessage({ type: 'recordAction', action: action }); } catch (e) {} }
     function getSelector(element) {
         if (!element) return '';
-        if (element.id) return `#${element.id}`;
-        
-        const uniqueAttrs = ['data-testid', 'name'];
-        for (const attr of uniqueAttrs) {
+        if (element.id) return `#${CSS.escape(element.id)}`;
+        const stableAttrs = ['data-testid', 'name', 'aria-label', 'placeholder', 'title', 'alt'];
+        for (const attr of stableAttrs) {
             const attrValue = element.getAttribute(attr);
             if (attrValue) {
-                const selector = `${element.tagName.toLowerCase()}[${attr}="${attrValue}"]`;
-                if (document.querySelectorAll(selector).length === 1) {
-                    return selector;
-                }
+                const selector = `${element.tagName.toLowerCase()}[${attr}="${CSS.escape(attrValue)}"]`;
+                try { if (document.querySelectorAll(selector).length === 1) return selector; } catch (e) {}
             }
         }
-        
         let path = '';
-        let current = element;
-        while (current && current.parentElement) {
+        let currentElement = element;
+        while (currentElement && currentElement.parentElement && currentElement.tagName.toLowerCase() !== 'body') {
+            if (currentElement.id) { path = `#${CSS.escape(currentElement.id)}` + path; break; }
             let siblingIndex = 1;
-            let sibling = current.previousElementSibling;
+            let sibling = currentElement.previousElementSibling;
             while (sibling) {
-                if (sibling.tagName === current.tagName) {
-                    siblingIndex++;
-                }
+                if (sibling.tagName === currentElement.tagName) { siblingIndex++; }
                 sibling = sibling.previousElementSibling;
             }
-            const tagName = current.tagName.toLowerCase();
+            const tagName = currentElement.tagName.toLowerCase();
             const nthChild = `:nth-of-type(${siblingIndex})`;
             path = ` > ${tagName}${nthChild}` + path;
-            current = current.parentElement;
-            if (current.tagName.toLowerCase() === 'body') break;
+            currentElement = currentElement.parentElement;
         }
-        return `body ${path}`.trim();
+        return `body${path}`.trim();
+    }
+    
+    // --- CORE LOGIC ---
+    const lastRecordedValue = new Map();
+
+    function recordInputChange(target) {
+        if (!target) return;
+        let value;
+        if (target.isContentEditable) { value = target.innerText; }
+        else if (typeof target.value !== 'undefined') { value = target.value; }
+        else { return; }
+        if (lastRecordedValue.get(target) !== value) {
+            console.log(`%c[CS] Input change recorded. Value: "${value}"`, 'color: orange');
+            sendMessage({ type: 'change', selector: getSelector(target), value: value });
+            lastRecordedValue.set(target, value);
+        }
     }
 
-    function isValidClickTarget(element) {
-        if (!element) return false;
-        const clickableTags = ['A', 'BUTTON', 'INPUT', 'TEXTAREA', 'SELECT', 'LI', 'SUMMARY'];
-        const clickableRoles = ['button', 'link', 'menuitem', 'tab', 'option', 'checkbox', 'radio', 'switch'];
-        if (clickableTags.includes(element.tagName)) {
-            if (element.tagName === 'INPUT' && !['button', 'submit', 'reset', 'checkbox', 'radio', 'image'].includes(element.type)) {
-                // It's a text-like input, click is less important than change.
-            }
-            return true;
+    // --- The All-in-One Mousedown Handler ---
+    function onMouseDown(event) {
+        const target = event.composedPath()[0];
+        const activeElement = document.activeElement;
+
+        // Step 1: Check if the click is happening away from an active input.
+        // This MUST happen first, as this is our only chance to get the correct input value.
+        if (activeElement && activeElement !== target && (activeElement.isContentEditable || ['INPUT', 'TEXTAREA'].includes(activeElement.tagName))) {
+            console.log(`%c[CS] Mousedown away from input. Saving input state.`, 'color: magenta');
+            recordInputChange(activeElement);
         }
-        const role = element.getAttribute('role');
-        if (role && clickableRoles.includes(role.toLowerCase())) {
-            return true;
-        }
-        if (element.hasAttribute('onclick') || element.hasAttribute('jsaction')) {
-            return true;
-        }
-        let parent = element.parentElement;
-        for (let i = 0; i < 3 && parent; i++) {
-            if (clickableTags.includes(parent.tagName) || (parent.getAttribute('role') && clickableRoles.includes(parent.getAttribute('role')))) {
-                return true;
-            }
-            parent = parent.parentElement;
-        }
-        return false;
+        
+        // Step 2: Immediately record the mousedown event as a 'click' action.
+        // We trust the mousedown target, not the click target.
+        console.log(`%c[CS] Mousedown detected, recording as click on target:`, 'color: green', target);
+        sendMessage({
+            type: 'click',
+            selector: getSelector(target),
+            label: target.innerText?.trim().substring(0, 50) || ''
+        });
     }
+
+    // --- ATTACH THE SINGLE, MOST IMPORTANT LISTENER ---
+    document.addEventListener('mousedown', onMouseDown, { capture: true });
+
+    console.log("[CS] Final 'Mousedown-is-King' listener is active.");
 }
